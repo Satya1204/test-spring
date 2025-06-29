@@ -1,0 +1,305 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Flutter WebSocket Debug - Raw Frame Analysis</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            margin-bottom: 20px;
+        }
+        .status {
+            padding: 10px;
+            margin: 10px 0;
+            border-radius: 5px;
+            font-weight: bold;
+        }
+        .connected { background-color: #d4edda; color: #155724; }
+        .disconnected { background-color: #f8d7da; color: #721c24; }
+        .warning { background-color: #fff3cd; color: #856404; }
+        .log {
+            background-color: #f8f9fa;
+            border: 1px solid #dee2e6;
+            padding: 15px;
+            height: 500px;
+            overflow-y: auto;
+            font-family: monospace;
+            font-size: 11px;
+            white-space: pre-wrap;
+        }
+        .controls {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 10px;
+            margin: 20px 0;
+        }
+        button {
+            padding: 10px 15px;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-weight: bold;
+        }
+        .primary { background-color: #007bff; color: white; }
+        .success { background-color: #28a745; color: white; }
+        .danger { background-color: #dc3545; color: white; }
+        .frame-analysis {
+            background-color: #e9ecef;
+            padding: 10px;
+            margin: 5px 0;
+            border-radius: 3px;
+            font-family: monospace;
+            font-size: 11px;
+        }
+        .raw-frame {
+            background-color: #fff3cd;
+            padding: 10px;
+            margin: 5px 0;
+            border-radius: 3px;
+            font-family: monospace;
+            font-size: 10px;
+            border-left: 4px solid #ffc107;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🔧 Flutter WebSocket Debug - Raw Frame Analysis</h1>
+        <p>This page simulates Flutter's native WebSocket behavior and analyzes raw STOMP frames.</p>
+        
+        <div id="status" class="status disconnected">
+            ❌ Disconnected
+        </div>
+
+        <div class="controls">
+            <button id="connectBtn" class="primary" onclick="connectNativeWebSocket()">Connect Native WebSocket</button>
+            <button id="disconnectBtn" class="danger" onclick="disconnectWebSocket()" disabled>Disconnect</button>
+            <button class="success" onclick="createTestGame()">Create Test Game</button>
+            <button class="success" onclick="sendTestJoin()">Send Test Join</button>
+        </div>
+
+        <div class="container">
+            <h3>📊 Frame Analysis</h3>
+            <div id="frameStats">
+                <div>Raw Frames Received: <span id="rawFrames">0</span></div>
+                <div>Complete JSON Messages: <span id="completeMessages">0</span></div>
+                <div>Truncated Messages: <span id="truncatedMessages">0</span></div>
+                <div>Parse Errors: <span id="parseErrors">0</span></div>
+            </div>
+        </div>
+
+        <div class="container">
+            <h3>📝 Raw Frame Log</h3>
+            <div id="log" class="log"></div>
+            <button onclick="clearLog()" class="danger" style="margin-top: 10px;">Clear Log</button>
+        </div>
+    </div>
+
+    <script>
+        let socket = null;
+        let currentGameCode = null;
+        let rawFrames = 0;
+        let completeMessages = 0;
+        let truncatedMessages = 0;
+        let parseErrors = 0;
+
+        function log(message, type = 'info') {
+            const timestamp = new Date().toLocaleTimeString();
+            const logElement = document.getElementById('log');
+            const prefix = type === 'error' ? '❌' : type === 'success' ? '✅' : type === 'warning' ? '⚠️' : 'ℹ️';
+            logElement.textContent += `[${timestamp}] ${prefix} ${message}\n`;
+            logElement.scrollTop = logElement.scrollHeight;
+        }
+
+        function updateStats() {
+            document.getElementById('rawFrames').textContent = rawFrames;
+            document.getElementById('completeMessages').textContent = completeMessages;
+            document.getElementById('truncatedMessages').textContent = truncatedMessages;
+            document.getElementById('parseErrors').textContent = parseErrors;
+        }
+
+        function analyzeRawFrame(rawData) {
+            log(`📦 RAW FRAME RECEIVED (${rawData.length} bytes):`);
+            log(`${rawData}`, 'warning');
+            
+            // Check if it's a STOMP frame
+            if (rawData.includes('MESSAGE\n')) {
+                log(`🔍 STOMP MESSAGE Frame Detected`);
+                
+                // Extract content-length
+                const contentLengthMatch = rawData.match(/content-length:(\d+)/);
+                if (contentLengthMatch) {
+                    const expectedLength = parseInt(contentLengthMatch[1]);
+                    log(`📏 Expected Content-Length: ${expectedLength} bytes`);
+                    
+                    // Find the JSON payload (after double newline)
+                    const headerEndIndex = rawData.indexOf('\n\n');
+                    if (headerEndIndex !== -1) {
+                        const jsonPayload = rawData.substring(headerEndIndex + 2);
+                        const actualLength = jsonPayload.length;
+                        
+                        log(`📏 Actual JSON Length: ${actualLength} bytes`);
+                        log(`📄 JSON Payload: ${jsonPayload}`);
+                        
+                        if (actualLength === expectedLength) {
+                            log(`✅ Frame Complete - Lengths Match!`, 'success');
+                            completeMessages++;
+                            
+                            // Try to parse JSON
+                            try {
+                                const parsed = JSON.parse(jsonPayload);
+                                log(`✅ JSON Parse Success: ${parsed.eventType}`, 'success');
+                            } catch (e) {
+                                log(`❌ JSON Parse Error: ${e.message}`, 'error');
+                                parseErrors++;
+                            }
+                        } else {
+                            log(`❌ Frame Truncated! Expected ${expectedLength}, got ${actualLength}`, 'error');
+                            truncatedMessages++;
+                            
+                            // Show exactly where truncation occurs
+                            if (actualLength < expectedLength) {
+                                log(`🔍 Truncation Point: Character ${actualLength + 1}`, 'error');
+                                log(`🔍 Missing: ${expectedLength - actualLength} bytes`, 'error');
+                            }
+                        }
+                    }
+                } else {
+                    log(`⚠️ No content-length header found`, 'warning');
+                }
+            }
+            
+            rawFrames++;
+            updateStats();
+        }
+
+        function connectNativeWebSocket() {
+            log('🔌 Connecting to Native WebSocket (Flutter-style)...');
+            
+            // Use native WebSocket like Flutter would
+            socket = new WebSocket('ws://localhost:8080/ws');
+            
+            socket.onopen = function(event) {
+                log('✅ Native WebSocket Connected!', 'success');
+                document.getElementById('status').className = 'status connected';
+                document.getElementById('status').textContent = '✅ Connected (Native)';
+                document.getElementById('connectBtn').disabled = true;
+                document.getElementById('disconnectBtn').disabled = false;
+                
+                // Send STOMP CONNECT frame manually (like Flutter would)
+                const connectFrame = 'CONNECT\naccept-version:1.0,1.1,2.0\nheart-beat:10000,10000\n\n\0';
+                socket.send(connectFrame);
+                log('📤 Sent STOMP CONNECT frame');
+            };
+            
+            socket.onmessage = function(event) {
+                const rawData = event.data;
+                log(`📨 Raw WebSocket Message Received:`);
+                analyzeRawFrame(rawData);
+                
+                // Handle CONNECTED frame
+                if (rawData.includes('CONNECTED\n')) {
+                    log('✅ STOMP CONNECTED received', 'success');
+                }
+            };
+            
+            socket.onerror = function(error) {
+                log(`❌ WebSocket Error: ${error}`, 'error');
+            };
+            
+            socket.onclose = function(event) {
+                log(`🔌 WebSocket Closed: ${event.code} - ${event.reason}`, 'warning');
+                document.getElementById('status').className = 'status disconnected';
+                document.getElementById('status').textContent = '❌ Disconnected';
+                document.getElementById('connectBtn').disabled = false;
+                document.getElementById('disconnectBtn').disabled = true;
+            };
+        }
+
+        function disconnectWebSocket() {
+            if (socket) {
+                socket.close();
+                socket = null;
+                log('🔌 Disconnected from WebSocket', 'warning');
+            }
+        }
+
+        function createTestGame() {
+            if (!socket || socket.readyState !== WebSocket.OPEN) {
+                log('❌ Not connected to WebSocket', 'error');
+                return;
+            }
+
+            // Create game via REST API first
+            fetch('http://localhost:8080/api/games', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    playerId: 1,
+                    maxPlayers: 4,
+                    minPlayers: 2
+                })
+            })
+            .then(response => response.json())
+            .then(data => {
+                currentGameCode = data.gameCode;
+                log(`🎮 Game created: ${currentGameCode}`, 'success');
+                
+                // Subscribe to game updates manually (like Flutter would)
+                const subscribeFrame = `SUBSCRIBE\nid:sub-0\ndestination:/topic/game/${currentGameCode}\n\n\0`;
+                socket.send(subscribeFrame);
+                log(`📡 Sent STOMP SUBSCRIBE to /topic/game/${currentGameCode}`);
+                
+            })
+            .catch(error => {
+                log('❌ Failed to create game: ' + error, 'error');
+            });
+        }
+
+        function sendTestJoin() {
+            if (!socket || !currentGameCode) {
+                log('❌ Not connected or no game created', 'error');
+                return;
+            }
+
+            // Send join message manually (like Flutter would)
+            const joinMessage = JSON.stringify({
+                gameCode: currentGameCode,
+                playerId: 2
+            });
+            
+            const sendFrame = `SEND\ndestination:/app/game/join\ncontent-length:${joinMessage.length}\n\n${joinMessage}\0`;
+            socket.send(sendFrame);
+            log(`📤 Sent STOMP SEND frame for game join`);
+        }
+
+        function clearLog() {
+            document.getElementById('log').textContent = '';
+            rawFrames = 0;
+            completeMessages = 0;
+            truncatedMessages = 0;
+            parseErrors = 0;
+            updateStats();
+        }
+
+        // Initialize
+        log('🚀 Flutter WebSocket Debug Page Loaded');
+        log('💡 This simulates how Flutter handles native WebSocket connections');
+        log('🔍 Click "Connect Native WebSocket" to test raw STOMP frame handling');
+        updateStats();
+    </script>
+</body>
+</html>

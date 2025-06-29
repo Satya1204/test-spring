@@ -17,25 +17,26 @@ import java.util.List;
 @RequiredArgsConstructor
 @CrossOrigin(origins = "*")
 public class PlayerController {
-    
+
     private final PlayerService playerService;
-    
+
     @PostMapping
     public ResponseEntity<PlayerResponse> createPlayer(@Valid @RequestBody PlayerRequest request) {
         try {
             PlayerResponse response = playerService.createPlayer(request);
+            System.out.println("Created player: " + response);
             return ResponseEntity.status(HttpStatus.CREATED).body(response);
         } catch (RuntimeException e) {
             return ResponseEntity.badRequest().build();
         }
     }
-    
+
     @GetMapping
     public ResponseEntity<List<PlayerResponse>> getAllPlayers() {
         List<PlayerResponse> players = playerService.getAllPlayers();
         return ResponseEntity.ok(players);
     }
-    
+
     @GetMapping("/{id}")
     public ResponseEntity<PlayerResponse> getPlayerById(@PathVariable Long id) {
         try {
@@ -45,7 +46,7 @@ public class PlayerController {
             return ResponseEntity.notFound().build();
         }
     }
-    
+
     @GetMapping("/name/{playerName}")
     public ResponseEntity<PlayerResponse> getPlayerByName(@PathVariable String playerName) {
         try {
@@ -55,9 +56,10 @@ public class PlayerController {
             return ResponseEntity.notFound().build();
         }
     }
-    
+
     @PutMapping("/{id}")
-    public ResponseEntity<PlayerResponse> updatePlayer(@PathVariable Long id, @Valid @RequestBody PlayerRequest request) {
+    public ResponseEntity<PlayerResponse> updatePlayer(@PathVariable Long id,
+            @Valid @RequestBody PlayerRequest request) {
         try {
             PlayerResponse response = playerService.updatePlayer(id, request);
             return ResponseEntity.ok(response);
@@ -65,9 +67,10 @@ public class PlayerController {
             return ResponseEntity.badRequest().build();
         }
     }
-    
+
     @PatchMapping("/{id}/coins")
-    public ResponseEntity<PlayerResponse> updatePlayerCoins(@PathVariable Long id, @Valid @RequestBody UpdateCoinsRequest request) {
+    public ResponseEntity<PlayerResponse> updatePlayerCoins(@PathVariable Long id,
+            @Valid @RequestBody UpdateCoinsRequest request) {
         try {
             PlayerResponse response = playerService.updatePlayerCoins(id, request.getCoins());
             return ResponseEntity.ok(response);
@@ -75,9 +78,10 @@ public class PlayerController {
             return ResponseEntity.notFound().build();
         }
     }
-    
+
     @PatchMapping("/{id}/add-coins")
-    public ResponseEntity<PlayerResponse> addCoinsToPlayer(@PathVariable Long id, @Valid @RequestBody UpdateCoinsRequest request) {
+    public ResponseEntity<PlayerResponse> addCoinsToPlayer(@PathVariable Long id,
+            @Valid @RequestBody UpdateCoinsRequest request) {
         try {
             PlayerResponse response = playerService.addCoinsToPlayer(id, request.getCoins());
             return ResponseEntity.ok(response);
@@ -85,7 +89,7 @@ public class PlayerController {
             return ResponseEntity.notFound().build();
         }
     }
-    
+
     @DeleteMapping("/{id}")
     public ResponseEntity<Void> deletePlayer(@PathVariable Long id) {
         try {
@@ -95,13 +99,13 @@ public class PlayerController {
             return ResponseEntity.notFound().build();
         }
     }
-    
+
     @GetMapping("/leaderboard")
     public ResponseEntity<List<PlayerResponse>> getLeaderboard() {
         List<PlayerResponse> players = playerService.getPlayersOrderByCoins();
         return ResponseEntity.ok(players);
     }
-    
+
     @GetMapping("/rich")
     public ResponseEntity<List<PlayerResponse>> getRichPlayers(@RequestParam(defaultValue = "1000") Integer minCoins) {
         List<PlayerResponse> players = playerService.getPlayersWithMinCoins(minCoins);

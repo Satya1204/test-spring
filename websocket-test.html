@@ -1,0 +1,328 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WebSocket Test - UNO Game</title>
+    <script src="https://cdn.jsdelivr.net/npm/sockjs-client@1.6.1/dist/sockjs.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/stomp.js/2.3.3/stomp.min.js"></script>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+
+        .status {
+            padding: 10px;
+            margin: 10px 0;
+            border-radius: 5px;
+        }
+
+        .connected {
+            background-color: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+
+        .disconnected {
+            background-color: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+
+        .log {
+            background-color: #f8f9fa;
+            border: 1px solid #dee2e6;
+            padding: 10px;
+            height: 300px;
+            overflow-y: auto;
+            font-family: monospace;
+            font-size: 12px;
+        }
+
+        button {
+            background-color: #007bff;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            margin: 5px;
+            border-radius: 5px;
+            cursor: pointer;
+        }
+
+        button:hover {
+            background-color: #0056b3;
+        }
+
+        button:disabled {
+            background-color: #6c757d;
+            cursor: not-allowed;
+        }
+
+        input,
+        select {
+            padding: 8px;
+            margin: 5px;
+            border: 1px solid #ccc;
+            border-radius: 3px;
+        }
+    </style>
+</head>
+
+<body>
+    <h1>🎮 UNO Game WebSocket Test</h1>
+
+    <div id="status" class="status disconnected">
+        ❌ Disconnected
+    </div>
+
+    <div>
+        <button id="connectBtn" onclick="connect()">Connect to WebSocket</button>
+        <button id="disconnectBtn" onclick="disconnect()" disabled>Disconnect</button>
+        <button onclick="testSockJSOnly()">Test SockJS Only</button>
+    </div>
+
+    <h3>Test Game Actions</h3>
+    <div>
+        <input type="text" id="gameCode" placeholder="Game Code (e.g., 123456)" value="123456">
+        <input type="number" id="playerId" placeholder="Player ID" value="1">
+        <button onclick="subscribeToGame()" disabled id="subscribeBtn">Subscribe to Game</button>
+    </div>
+
+    <div>
+        <button onclick="testJoinGame()" disabled id="joinBtn">Test Join Game</button>
+        <button onclick="testPlayCard()" disabled id="playBtn">Test Play Card</button>
+        <button onclick="testDrawCard()" disabled id="drawBtn">Test Draw Card</button>
+    </div>
+
+    <h3>Connection Log</h3>
+    <div id="log" class="log"></div>
+
+    <script>
+        let stompClient = null;
+        let connected = false;
+
+        function log(message) {
+            const logDiv = document.getElementById('log');
+            const timestamp = new Date().toLocaleTimeString();
+            logDiv.innerHTML += `[${timestamp}] ${message}\n`;
+            logDiv.scrollTop = logDiv.scrollHeight;
+        }
+
+        function updateStatus(isConnected) {
+            const statusDiv = document.getElementById('status');
+            const connectBtn = document.getElementById('connectBtn');
+            const disconnectBtn = document.getElementById('disconnectBtn');
+            const subscribeBtn = document.getElementById('subscribeBtn');
+            const joinBtn = document.getElementById('joinBtn');
+            const playBtn = document.getElementById('playBtn');
+            const drawBtn = document.getElementById('drawBtn');
+
+            connected = isConnected;
+
+            if (isConnected) {
+                statusDiv.className = 'status connected';
+                statusDiv.innerHTML = '✅ Connected to WebSocket';
+                connectBtn.disabled = true;
+                disconnectBtn.disabled = false;
+                subscribeBtn.disabled = false;
+            } else {
+                statusDiv.className = 'status disconnected';
+                statusDiv.innerHTML = '❌ Disconnected';
+                connectBtn.disabled = false;
+                disconnectBtn.disabled = true;
+                subscribeBtn.disabled = true;
+                joinBtn.disabled = true;
+                playBtn.disabled = true;
+                drawBtn.disabled = true;
+            }
+        }
+
+        function connect() {
+            log('🔄 Attempting to connect to WebSocket...');
+
+            try {
+                const socket = new SockJS('http://localhost:8080/ws');
+
+                // Add SockJS event listeners for debugging
+                socket.onopen = function () {
+                    log('🔌 SockJS connection opened');
+                };
+
+                socket.onclose = function (event) {
+                    log('🔌 SockJS connection closed: ' + event.code + ' - ' + event.reason);
+                };
+
+                socket.onerror = function (error) {
+                    log('🔌 SockJS error: ' + JSON.stringify(error));
+                };
+
+                stompClient = Stomp.over(socket);
+
+                // Enable debug logging
+                stompClient.debug = function (str) {
+                    log('DEBUG: ' + str);
+                };
+
+                // Set connection timeout
+                stompClient.heartbeat.outgoing = 20000;
+                stompClient.heartbeat.incoming = 20000;
+
+                stompClient.connect({}, function (frame) {
+                    log('✅ Connected successfully!');
+                    log('Frame: ' + frame);
+                    updateStatus(true);
+                }, function (error) {
+                    log('❌ Connection error: ' + JSON.stringify(error));
+                    updateStatus(false);
+                });
+
+            } catch (e) {
+                log('❌ Exception during connection: ' + e.message);
+                updateStatus(false);
+            }
+        }
+
+        function disconnect() {
+            if (stompClient !== null) {
+                stompClient.disconnect();
+                log('🔌 Disconnected from WebSocket');
+            }
+            updateStatus(false);
+        }
+
+        function subscribeToGame() {
+            if (!connected) {
+                log('❌ Not connected to WebSocket');
+                return;
+            }
+
+            const gameCode = document.getElementById('gameCode').value;
+            if (!gameCode) {
+                log('❌ Please enter a game code');
+                return;
+            }
+
+            log(`📡 Subscribing to game: ${gameCode}`);
+
+            stompClient.subscribe(`/topic/game/${gameCode}`, function (message) {
+                log('📨 Received game event: ' + message.body);
+                try {
+                    const event = JSON.parse(message.body);
+                    log(`🎮 Event Type: ${event.eventType}`);
+                    log(`🎮 Game Code: ${event.gameCode}`);
+                    if (event.playerName) {
+                        log(`👤 Player: ${event.playerName}`);
+                    }
+                } catch (e) {
+                    log('❌ Error parsing message: ' + e.message);
+                }
+            });
+
+            // Enable test buttons
+            document.getElementById('joinBtn').disabled = false;
+            document.getElementById('playBtn').disabled = false;
+            document.getElementById('drawBtn').disabled = false;
+
+            log('✅ Subscribed to game updates');
+        }
+
+        function testJoinGame() {
+            if (!connected) {
+                log('❌ Not connected to WebSocket');
+                return;
+            }
+
+            const gameCode = document.getElementById('gameCode').value;
+            const playerId = document.getElementById('playerId').value;
+
+            const message = {
+                gameCode: gameCode,
+                playerId: parseInt(playerId)
+            };
+
+            log('📤 Sending join game message: ' + JSON.stringify(message));
+            stompClient.send('/app/game/join', {}, JSON.stringify(message));
+        }
+
+        function testPlayCard() {
+            if (!connected) {
+                log('❌ Not connected to WebSocket');
+                return;
+            }
+
+            const gameCode = document.getElementById('gameCode').value;
+            const playerId = document.getElementById('playerId').value;
+
+            const message = {
+                gameCode: gameCode,
+                playerId: parseInt(playerId),
+                cardId: 1,
+                chosenColor: 'RED'
+            };
+
+            log('📤 Sending play card message: ' + JSON.stringify(message));
+            stompClient.send('/app/game/play-card', {}, JSON.stringify(message));
+        }
+
+        function testDrawCard() {
+            if (!connected) {
+                log('❌ Not connected to WebSocket');
+                return;
+            }
+
+            const gameCode = document.getElementById('gameCode').value;
+            const playerId = document.getElementById('playerId').value;
+
+            const message = {
+                gameCode: gameCode,
+                playerId: parseInt(playerId)
+            };
+
+            log('📤 Sending draw card message: ' + JSON.stringify(message));
+            stompClient.send('/app/game/draw-card', {}, JSON.stringify(message));
+        }
+
+        function testSockJSOnly() {
+            log('🧪 Testing SockJS connection only...');
+
+            try {
+                const socket = new SockJS('http://localhost:8080/ws');
+
+                socket.onopen = function () {
+                    log('✅ SockJS connection successful!');
+                    socket.close();
+                };
+
+                socket.onclose = function (event) {
+                    log('🔌 SockJS connection closed: ' + event.code + ' - ' + event.reason);
+                };
+
+                socket.onerror = function (error) {
+                    log('❌ SockJS connection failed: ' + JSON.stringify(error));
+                };
+
+                // Set a timeout to detect if connection hangs
+                setTimeout(() => {
+                    if (socket.readyState === SockJS.CONNECTING) {
+                        log('⏰ SockJS connection timeout - still connecting after 10 seconds');
+                        socket.close();
+                    }
+                }, 10000);
+
+            } catch (e) {
+                log('❌ Exception during SockJS test: ' + e.message);
+            }
+        }
+
+        // Initialize
+        log('🚀 WebSocket Test Page Loaded');
+        log('📍 Backend URL: http://localhost:8080/ws');
+        log('💡 Click "Connect to WebSocket" to start testing');
+    </script>
+</body>
+
+</html>

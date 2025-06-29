@@ -25,6 +25,7 @@ public class GameService {
     private final CardRepository cardRepository;
     private final GameEventRepository gameEventRepository;
     private final PlayerRepository playerRepository;
+    private final OptimizedWebSocketService optimizedWebSocketService;
     
     public GameResponse createGame(CreateGameRequest request) {
         Player creator = playerRepository.findById(request.getPlayerId())
@@ -80,12 +81,27 @@ public class GameService {
         logGameEvent(game, player, "PLAYER_JOINED", 
             String.format("{\"playerName\":\"%s\",\"playerOrder\":%d}", player.getPlayerName(), playerOrder));
         
+        // Get updated game state for WebSocket broadcast
+        Game updatedGame = gameRepository.findById(game.getId()).orElse(game);
+        GameResponse gameResponse = GameResponse.fromEntity(updatedGame, player.getId());
+        
+        // Broadcast PLAYER_JOINED event
+        optimizedWebSocketService.broadcastPlayerJoined(
+                game.getGameCode(),
+                player.getId(),
+                player.getPlayerName(),
+                playerOrder,
+                gameResponse.getPlayers().size());
+        
+        // Broadcast GAME_UPDATE event with current player information
+        optimizedWebSocketService.broadcastGameUpdate(game.getGameCode(), gameResponse);
+        
         // Start game if we have enough players
         if (game.canStart() && gamePlayerRepository.countActivePlayersByGame(game.getId()) >= game.getMinPlayers()) {
             startGame(game);
         }
         
-        return GameResponse.fromEntity(gameRepository.findById(game.getId()).orElse(game), player.getId());
+        return gameResponse;
     }
     
     private void startGame(Game game) {
@@ -106,6 +122,13 @@ public class GameService {
         // Log game start event
         logGameEvent(game, null, "GAME_STARTED", 
             String.format("{\"playerCount\":%d}", game.getGamePlayers().size()));
+        
+        // Get updated game state for WebSocket broadcast
+        Game updatedGame = gameRepository.findById(game.getId()).orElse(game);
+        GameResponse gameResponse = GameResponse.fromEntity(updatedGame, null);
+        
+        // Broadcast GAME_STARTED event with current player information
+        optimizedWebSocketService.broadcastGameStarted(game.getGameCode(), gameResponse);
     }
     
     private void createDeck(Game game) {
